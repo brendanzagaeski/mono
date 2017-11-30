@@ -184,17 +184,10 @@ namespace Mono.AppleTls
 
 				if (status == SslStatus.PeerAuthCompleted) {
 					RequirePeerTrust ();
+					// Prepare to re-evaluate trust in case we later do a renegotiation handshake
+					havePeerTrust = false;
 				} else if (status == SslStatus.PeerClientCertRequested) {
-					RequirePeerTrust ();
-					if (remoteCertificate == null)
-						throw new TlsException (AlertDescription.InternalError, "Cannot request client certificate before receiving one from the server.");
-					localClientCertificate = SelectClientCertificate (remoteCertificate, null);
-					if (localClientCertificate == null)
-						continue;
-					clientIdentity = AppleCertificateHelper.GetIdentity (localClientCertificate);
-					if (clientIdentity == null)
-						throw new TlsException (AlertDescription.CertificateUnknown);
-					SetCertificate (clientIdentity, new SecCertificate [0]);
+					SetPeerClientCert ();
 				} else if (status == SslStatus.WouldBlock) {
 					return false;
 				} else if (status == SslStatus.Success) {
@@ -267,6 +260,20 @@ namespace Mono.AppleTls
 
 			if (!ok)
 				throw new TlsException (AlertDescription.CertificateUnknown);
+		}
+
+		void SetPeerClientCert ()
+		{
+			RequirePeerTrust ();
+			if (remoteCertificate == null)
+				throw new TlsException (AlertDescription.InternalError, "Cannot request client certificate before receiving one from the server.");
+			localClientCertificate = SelectClientCertificate (remoteCertificate, null);
+			if (localClientCertificate == null)
+				return;
+			clientIdentity = AppleCertificateHelper.GetIdentity (localClientCertificate);
+			if (clientIdentity == null)
+				throw new TlsException (AlertDescription.CertificateUnknown);
+			SetCertificate (clientIdentity, new SecCertificate [0]);
 		}
 
 		void InitializeConnection ()
@@ -802,8 +809,23 @@ namespace Mono.AppleTls
 					return (0, false);
 				}
 
-				CheckStatusAndThrow (status, SslStatus.WouldBlock, SslStatus.ClosedGraceful);
-				var wantMore = status == SslStatus.WouldBlock;
+				CheckStatusAndThrow (status, SslStatus.WouldBlock, SslStatus.ClosedGraceful, SslStatus.PeerAuthCompleted, SslStatus.PeerClientCertRequested);
+
+				/*
+				 * Renegotiation handshakes are performed via SSLRead() rather than
+				 * SSLHandshake().  In that scenario, SSLRead() can return
+				 * 'PeerAuthCompleted' or 'PeerClientCertRequested', so this method
+				 * needs to handle those statuses too.
+				 */
+				if (status == SslStatus.PeerAuthCompleted) {
+					RequirePeerTrust ();
+					// Prepare to re-evaluate trust in case we later do _another_ renegotiation handshake
+					havePeerTrust = false;
+				} else if (status == SslStatus.PeerClientCertRequested) {
+					SetPeerClientCert ();
+				}
+
+				var wantMore = status == SslStatus.WouldBlock || status == SslStatus.PeerAuthCompleted || status == SslStatus.PeerClientCertRequested;
 				return ((int)processed, wantMore);
 			} catch (Exception ex) {
 				Debug ("Read error: {0}", ex);

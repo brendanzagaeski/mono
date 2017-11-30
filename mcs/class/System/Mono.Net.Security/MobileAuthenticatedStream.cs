@@ -455,13 +455,13 @@ namespace Mono.Net.Security
 		}
 
 		/*
-		 * We may get called from SSLWrite(), SSLHandshake() or SSLClose().
+		 * We may get called from SSLWrite(), SSLHandshake(), SSLRead() or SSLClose().
 		 */
 		internal bool InternalWrite (byte[] buffer, int offset, int size)
 		{
 			try {
 				Debug ("InternalWrite: {0} {1}", offset, size);
-				var asyncRequest = asyncHandshakeRequest ?? asyncWriteRequest;
+				var asyncRequest = asyncHandshakeRequest ?? asyncWriteRequest ?? asyncReadRequest;
 				return InternalWrite (asyncRequest, writeBuffer, buffer, offset, size);
 			} catch (Exception ex) {
 				Debug ("InternalWrite failed: {0}", ex);
